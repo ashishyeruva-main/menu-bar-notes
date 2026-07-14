@@ -5,6 +5,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store: NoteStore?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Required so ⌘A / ⌘C / ⌘V / ⌘X / ⌘Z reach TextEditor in this accessory app.
+        MainMenu.install()
+
         let store = NoteStore()
         self.store = store
         statusBarController = StatusBarController(store: store)

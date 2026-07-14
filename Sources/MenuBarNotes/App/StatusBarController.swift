@@ -53,10 +53,9 @@ final class StatusBarController: NSObject, NSWindowDelegate {
             return
         }
 
+        // Always show the editor after ensure — success or create failure both need the header status strip.
         _ = store.ensureActiveNote()
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        popover.contentViewController?.view.window?.makeKey()
-        NSApp.activate(ignoringOtherApps: true)
+        showEditor(from: button)
     }
 
     private func showContextMenu(from button: NSStatusBarButton) {
@@ -108,9 +107,9 @@ final class StatusBarController: NSObject, NSWindowDelegate {
     // MARK: - Menu actions
 
     @objc private func newNoteAction() {
-        if store.createNewNote() != nil {
-            showEditorIfNeeded()
-        }
+        // Open the editor even on failure so `lastError` is visible in the header.
+        _ = store.createNewNote()
+        showEditorIfNeeded()
     }
 
     @objc private func openExistingAction() {
@@ -131,6 +130,10 @@ final class StatusBarController: NSObject, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
         if panel.runModal() == .OK, let url = panel.url {
             store.setNotesDirectory(url)
+            // Surface folder errors (or confirm success context) in the editor header if needed.
+            if store.lastError != nil {
+                showEditorIfNeeded()
+            }
         }
     }
 
@@ -146,9 +149,20 @@ final class StatusBarController: NSObject, NSWindowDelegate {
     private func showEditorIfNeeded() {
         guard let button = statusItem.button else { return }
         if !popover.isShown {
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            popover.contentViewController?.view.window?.makeKey()
-            NSApp.activate(ignoringOtherApps: true)
+            showEditor(from: button)
+        }
+    }
+
+    private func showEditor(from button: NSStatusBarButton) {
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        NSApp.activate(ignoringOtherApps: true)
+        // Make the popover key so the text view can accept typing and Edit-menu shortcuts.
+        if let window = popover.contentViewController?.view.window {
+            window.makeKey()
+            // Prefer first responder inside the editor after layout.
+            DispatchQueue.main.async {
+                window.makeFirstResponder(window.contentView)
+            }
         }
     }
 
@@ -167,6 +181,7 @@ final class StatusBarController: NSObject, NSWindowDelegate {
                 onSelect: { [weak self] note in
                     self?.store.openNote(at: note.url)
                     self?.closePicker()
+                    // Always open editor so open failures show in the status strip.
                     self?.showEditorIfNeeded()
                 },
                 onCancel: { [weak self] in
