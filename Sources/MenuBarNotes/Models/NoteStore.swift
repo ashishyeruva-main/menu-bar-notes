@@ -98,7 +98,15 @@ final class NoteStore: ObservableObject {
 
     @discardableResult
     func createNewNote() -> URL? {
-        flushSave()
+        // Persist any real content first. Empty drafts are discarded instead of
+        // left as vault litter when the user asks for a new note.
+        // Dismissing the popover does NOT delete an empty note — only New Note does.
+        if isCurrentNoteEffectivelyEmpty {
+            deleteCurrentNoteIfEmpty()
+        } else {
+            flushSave()
+        }
+
         ensureNotesDirectory()
 
         let counter = nextCounter()
@@ -118,6 +126,8 @@ final class NoteStore: ObservableObject {
     }
 
     func openNote(at url: URL) {
+        // Switching via Open Existing keeps the previous note, even if empty —
+        // only New Note discards an unused empty draft.
         flushSave()
         guard isUnderNotesDirectory(url) else {
             lastError = "That note is outside the notes folder."
@@ -169,6 +179,38 @@ final class NoteStore: ObservableObject {
     func flushSave() {
         guard isDirty, let url = currentNoteURL else { return }
         writeToDisk(url: url, text: content)
+    }
+
+    /// True when the active note has no meaningful content (nothing written).
+    /// Whitespace-only counts as empty.
+    private var isCurrentNoteEffectivelyEmpty: Bool {
+        guard currentNoteURL != nil else { return false }
+        return content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Removes the active note file if it is empty. Used only when creating a new note,
+    /// not when dismissing the popover.
+    private func deleteCurrentNoteIfEmpty() {
+        guard isCurrentNoteEffectivelyEmpty, let url = currentNoteURL else { return }
+        guard isUnderNotesDirectory(url) else { return }
+
+        do {
+            if fileManager.fileExists(atPath: url.path) {
+                try fileManager.removeItem(at: url)
+            }
+            lastError = nil
+        } catch {
+            lastError = "Could not remove empty note: \(error.localizedDescription)"
+            // Still clear the active note so createNewNote can proceed with a fresh file.
+        }
+
+        currentNoteURL = nil
+        currentNoteName = ""
+        lastSavedContent = ""
+        content = ""
+        isDirty = false
+        defaults.removeObject(forKey: Self.lastNoteKey)
+        stopAutosaveIfClean()
     }
 
     // MARK: - Autosave (Obsidian-like ~2s)
